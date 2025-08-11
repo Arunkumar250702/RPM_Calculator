@@ -113,40 +113,41 @@
   </div>
 
   <script>
-  async function uploadImage() {
-    const fileInput = document.getElementById('fileInput');
-    if (!fileInput.files.length) {
-      alert("Please select an image file.");
-      return;
-    }
-    const file = fileInput.files[0];
-    const formData = new FormData();
-    formData.append('file', file);
-
-    try {
-      const response = await fetch('http://localhost:8000/extract', {  // <-- change this line
-        method: 'POST',
-        body: formData
-      });
-
-      if (!response.ok) {
-        throw new Error("HTTP error " + response.status);
-      }
-
-      const data = await response.json();
-
-      let output = '';
-      for (const [key, value] of Object.entries(data)) {
-        output += `${key}: ${value !== null ? value : 'N/A'}\n`;
-      }
-
-      document.getElementById('result').textContent = output;
-
-    } catch (error) {
-      alert("Error: " + error.message);
-    }
+async function uploadImage() {
+  const fileInput = document.getElementById('fileInput');
+  if (!fileInput.files.length) {
+    alert("Please select an image file.");
+    return;
   }
+  const file = fileInput.files[0];
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const response = await fetch('/extract', {  // <-- changed here to relative path
+      method: 'POST',
+      body: formData
+    });
+
+    if (!response.ok) {
+      throw new Error("HTTP error " + response.status);
+    }
+
+    const data = await response.json();
+
+    let output = '';
+    for (const [key, value] of Object.entries(data)) {
+      output += `${key}: ${value !== null ? value : 'N/A'}\n`;
+    }
+
+    document.getElementById('result').textContent = output;
+
+  } catch (error) {
+    alert("Error: " + error.message);
+  }
+}
 </script>
+
 
 </body>
 </html>
