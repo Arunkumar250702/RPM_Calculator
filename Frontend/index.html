@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RPM CALCULATOR</title>
+  <style>
+    body { font-family: sans-serif; background: #f4f6f8; display: flex; flex-direction: column; align-items: center; }
+    .container { background: white; padding: 20px; border-radius: 8px; width: 400px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    label { font-weight: bold; margin-top: 10px; display: block; }
+    input { width: 100%; padding: 8px; margin-top: 5px; }
+    button { margin-top: 10px; padding: 10px; border: none; border-radius: 5px; cursor: pointer; }
+    #saveBtn { background: #28a745; color: white; }
+    #cancelBtn { background: #dc3545; color: white; margin-left: 5px; }
+    #result { background: #e9ecef; padding: 10px; margin-top: 15px; min-height: 120px; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>RPM CALCULATOR</h1>
+  <div class="container">
+    <label>Motor Name:</label>
+    <input type="text" id="motorName" placeholder="Enter motor name" />
+
+    <label>Select Image:</label>
+    <input type="file" id="fileInput" accept="image/*" />
+
+    <button onclick="uploadImage()">Extract Data</button>
+    <div>
+      <button id="saveBtn" style="display:none" onclick="saveData()">Save</button>
+      <button id="cancelBtn" style="display:none" onclick="resetForm()">Cancel</button>
+    </div>
+    <pre id="result">Upload VESC image to see results.</pre>
+  </div>
+
+  <script>
+    // 👇 Backend API URL
+    const API_BASE = "http://localhost:8000";
+
+    let lastExtract = null;
+
+    async function uploadImage() {
+      const motorName = document.getElementById('motorName').value.trim();
+      if (!motorName) return alert("Enter Motor Name");
+
+      const file = document.getElementById('fileInput').files[0];
+      if (!file) return alert("Select an image");
+
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('motorName', motorName);
+
+      const res = await fetch(`${API_BASE}/extract`, { method: 'POST', body: formData });
+      const data = await res.json();
+
+      lastExtract = data;
+      document.getElementById('result').textContent = JSON.stringify(data, null, 2);
+      document.getElementById('saveBtn').style.display = 'inline-block';
+      document.getElementById('cancelBtn').style.display = 'inline-block';
+    }
+
+    async function saveData() {
+      if (!lastExtract) return;
+      const formData = new FormData();
+
+      const keyMap = {
+        "Motor Name": "MotorName",
+        "I Batt": "IBatt",
+        "I Motor": "IMotor",
+        "Normal ERPM": "NormalERPM",
+        "48V RPM": "RPM48V"
+      };
+
+      for (const key in lastExtract) {
+        const mappedKey = keyMap[key] || key.replace(/ /g, "");
+        formData.append(mappedKey, lastExtract[key]);
+      }
+
+      await fetch(`${API_BASE}/save`, { method: 'POST', body: formData });
+      alert("Data saved to DB!");
+      resetForm();
+    }
+
+    function resetForm() {
+      document.getElementById('motorName').value = '';
+      document.getElementById('fileInput').value = '';
+      document.getElementById('result').textContent = 'Upload VESC image to see results.';
+      document.getElementById('saveBtn').style.display = 'none';
+      document.getElementById('cancelBtn').style.display = 'none';
+      lastExtract = null;
+    }
+  </script>
+</body>
+</html>
