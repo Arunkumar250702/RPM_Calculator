@@ -11,10 +11,8 @@ from PIL import Image
 import pytesseract
 import pandas as pd
 
-# Ensure uploads folder exists
 os.makedirs("uploads", exist_ok=True)
 
-# SQLite DB setup
 DB_FILE = "data.db"
 conn = sqlite3.connect(DB_FILE, check_same_thread=False)
 cursor = conn.cursor()
@@ -40,7 +38,7 @@ conn.commit()
 
 app = FastAPI()
 
-# Allow all CORS
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -49,17 +47,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve static (placeholder only)
+# Static frontend
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
 async def root():
-    index_path = os.path.join("static", "index.html")
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
-    return {"status": "ok", "message": "Backend is running"}
+    return FileResponse("static/index.html")
 
-# OCR Extraction Endpoint
 @app.post("/extract")
 async def extract_data(file: UploadFile = File(...), motorName: str = Form(...)):
     image_data = await file.read()
@@ -82,7 +76,6 @@ async def extract_data(file: UploadFile = File(...), motorName: str = Form(...))
     normal_erpm = erpm / 7 if erpm else None
     rpm_48v = (erpm / 7 / volts_in * 48) if erpm and volts_in else None
 
-    # Temporarily store image
     temp_path = os.path.join("uploads", f"temp_{file.filename}")
     with open(temp_path, "wb") as f:
         f.write(image_data)
@@ -102,7 +95,6 @@ async def extract_data(file: UploadFile = File(...), motorName: str = Form(...))
         "Temp Image": temp_path
     }
 
-# Save to DB
 @app.post("/save")
 async def save_data(
     MotorName: str = Form(...),
@@ -118,12 +110,10 @@ async def save_data(
     RPM48V: float = Form(None),
     TempImage: str = Form(...)
 ):
-    # Save final image
     final_image_path = os.path.join("uploads", f"{MotorName}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
     os.rename(TempImage, final_image_path)
     image_url = f"/{final_image_path}"
 
-    # Insert into SQLite
     cursor.execute("""
         INSERT INTO motor_data (
             motor_name, date_time, power, duty, erpm, i_batt, i_motor, t_fet, t_motor, volts_in, normal_erpm, rpm_48v, image_url
@@ -134,10 +124,8 @@ async def save_data(
         Power, Duty, ERPM, IBatt, IMotor, TFET, TMotor, VoltsIn, NormalERPM, RPM48V, image_url
     ))
     conn.commit()
+    return {"status": "success", "message": "Data saved"}
 
-    return {"status": "success", "message": "Data saved to DB", "image_url": image_url}
-
-# Export DB to Excel
 @app.get("/export")
 async def export_excel():
     df = pd.read_sql_query("SELECT * FROM motor_data", conn)
