@@ -141,7 +141,8 @@
   </div>
 
   <script>
-    const API_BASE = "http://127.0.0.1:8000";
+    // ✅ Updated API base to your Render deployment URL
+    const API_BASE = "https://rpmcalculator.onrender.com";
     let lastExtract = null;
 
     function handleMotorChange() {
@@ -165,32 +166,44 @@
       if (motorSelect === "R&D Motor" && !rdMotorName) return alert("Please enter R&D Motor name");
       if (!file) return alert("Please select image");
 
-      // Determine motor name
       const motorName = motorSelect === "R&D Motor" ? rdMotorName : motorSelect;
 
       const formData = new FormData();
       formData.append('file', file);
       formData.append('motorName', `${clientName} - ${motorName}`);
 
-      const res = await fetch(`${API_BASE}/extract`, { method: 'POST', body: formData });
-      const data = await res.json();
-      lastExtract = data;
+      try {
+        const res = await fetch(`${API_BASE}/extract`, { method: 'POST', body: formData });
+        if (!res.ok) throw new Error("Failed to extract data");
+        const data = await res.json();
+        lastExtract = data;
 
-      document.getElementById('result').textContent = JSON.stringify(data, null, 2);
-      document.getElementById('saveBtn').style.display = 'inline-block';
-      document.getElementById('cancelBtn').style.display = 'inline-block';
+        document.getElementById('result').textContent = JSON.stringify(data, null, 2);
+        document.getElementById('saveBtn').style.display = 'inline-block';
+        document.getElementById('cancelBtn').style.display = 'inline-block';
+      } catch (err) {
+        alert("Error: " + err.message);
+      }
     }
 
     async function saveData() {
+      if (!lastExtract) return alert("No data to save!");
       const formData = new FormData();
       const keyMap = { "Motor Name": "MotorName", "I Batt": "IBatt", "I Motor": "IMotor", "Normal ERPM": "NormalERPM", "48V RPM": "RPM48V" };
+
       for (const key in lastExtract) {
         const mappedKey = keyMap[key] || key.replace(/ /g, "");
         formData.append(mappedKey, lastExtract[key]);
       }
-      await fetch(`${API_BASE}/save`, { method: 'POST', body: formData });
-      alert("Saved!");
-      resetForm();
+
+      try {
+        const res = await fetch(`${API_BASE}/save`, { method: 'POST', body: formData });
+        if (!res.ok) throw new Error("Failed to save data");
+        alert("Data saved successfully!");
+        resetForm();
+      } catch (err) {
+        alert("Error: " + err.message);
+      }
     }
 
     function resetForm() {
