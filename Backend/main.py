@@ -2,21 +2,29 @@ import os
 import io
 import re
 import sqlite3
+from datetime import datetime
+import platform
 import cv2
 import numpy as np
 import pandas as pd
-import easyocr
-from datetime import datetime
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from PIL import Image
+import pytesseract
 
-# ✅ Ensure directories exist
+# ✅ Auto-detect Tesseract path
+if platform.system() == "Windows":
+    pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+else:
+    pytesseract.pytesseract.tesseract_cmd = "/usr/bin/tesseract"
+
+# ✅ Ensure folders exist
 os.makedirs("uploads", exist_ok=True)
 os.makedirs("static", exist_ok=True)
 
-# ✅ SQLite Database Setup
+# ✅ SQLite setup
 DB_FILE = "data.db"
 conn = sqlite3.connect(DB_FILE, check_same_thread=False)
 cursor = conn.cursor()
@@ -40,13 +48,10 @@ CREATE TABLE IF NOT EXISTS motor_data (
 """)
 conn.commit()
 
-# ✅ Initialize OCR
-reader = easyocr.Reader(['en'], gpu=False)
-
-# ✅ FastAPI App
+# ✅ Initialize FastAPI
 app = FastAPI()
 
-# ✅ Enable CORS
+# ✅ Enable CORS for frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -55,33 +60,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ✅ Serve static frontend files
+# ✅ Serve static frontend
 app.mount("/static", StaticFiles(directory="static"), name="static")
-
 
 @app.get("/")
 async def root():
-    """Serve frontend index.html if exists"""
+    """Serve main page"""
     index_path = "static/index.html"
     if os.path.exists(index_path):
         return FileResponse(index_path)
     return JSONResponse({"message": "Frontend not found"}, status_code=404)
 
-
-# ✅ OCR Extraction
+# ✅ OCR Extraction (lightweight pytesseract)
 @app.post("/extract")
 async def extract_data(file: UploadFile = File(...), motorName: str = Form(...)):
-    """Extract text and numerical data from uploaded image."""
     try:
         contents = await file.read()
-        image_np = np.frombuffer(contents, np.uint8)
-        image = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
+        image = Image.open(io.BytesIO(contents))
+        text = pytesseract.image_to_string(image)
 
-        # 🔍 Use EasyOCR
-        result = reader.readtext(image)
-        text = " ".join([r[1] for r in result])
-
-        # 🔎 Extract values using regex
         def find_value(pattern):
             match = re.search(pattern, text, re.IGNORECASE)
             return float(match.group(1)) if match else None
@@ -98,7 +95,6 @@ async def extract_data(file: UploadFile = File(...), motorName: str = Form(...))
         normal_erpm = erpm / 7 if erpm else None
         rpm_48v = (erpm / 7 / volts_in * 48) if erpm and volts_in else None
 
-        # ✅ Save temporary image
         temp_path = os.path.join("uploads", f"temp_{file.filename}")
         with open(temp_path, "wb") as f:
             f.write(contents)
@@ -121,8 +117,7 @@ async def extract_data(file: UploadFile = File(...), motorName: str = Form(...))
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
-
-# ✅ Save Data
+# ✅ Save to DB
 @app.post("/save")
 async def save_data(
     MotorName: str = Form(...),
@@ -138,13 +133,10 @@ async def save_data(
     RPM48V: float = Form(None),
     TempImage: str = Form(...),
 ):
-    """Save extracted data to SQLite database and move uploaded image."""
     try:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         final_image_path = os.path.join("uploads", f"{MotorName}_{timestamp}.png")
-
-        import shutil
-        shutil.copy(TempImage, final_image_path)
+        os.rename(TempImage, final_image_path)
         image_url = f"/{final_image_path}"
 
         cursor.execute("""
@@ -163,12 +155,13 @@ async def save_data(
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
-
 # ✅ Export Excel
 @app.get("/export")
 async def export_excel():
-    """Export all data to Excel (data.xlsx)."""
-    df = pd.read_sql_query("SELECT * FROM motor_data", conn)
-    excel_file = "data.xlsx"
-    df.to_excel(excel_file, index=False)
-    return FileResponse(excel_file, filename="data.xlsx")
+    try:
+        df = pd.read_sql_query("SELECT * FROM motor_data", conn)
+        excel_file = "data.xlsx"
+        df.to_excel(excel_file, index=False)
+        return FileResponse(excel_file, filename="motor_data.xlsx", media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
