@@ -2,6 +2,7 @@ import os
 import io
 import re
 import sqlite3
+import platform
 from datetime import datetime
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,7 +14,14 @@ import pandas as pd
 import traceback
 
 
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+# =========================================================
+# ✅ Configure Tesseract Path (Windows vs Linux)
+# =========================================================
+if platform.system() == "Windows":
+    pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+# On Render (Linux), it’ll auto-find `/usr/bin/tesseract`
+
+
 # =========================================================
 # ✅ Ensure folders exist
 # =========================================================
@@ -68,7 +76,6 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # =========================================================
 @app.get("/")
 async def root():
-    """Serve index.html if exists"""
     index_path = os.path.join("static", "index.html")
     if os.path.exists(index_path):
         return FileResponse(index_path)
@@ -86,7 +93,6 @@ async def extract_data(file: UploadFile = File(...), motorName: str = Form(...))
         text = pytesseract.image_to_string(image)
 
         def find_value(pattern):
-            """Extract float value using regex pattern"""
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 try:
@@ -95,7 +101,6 @@ async def extract_data(file: UploadFile = File(...), motorName: str = Form(...))
                     return None
             return None
 
-        # Extract numeric values
         power = find_value(r"power\s*[:=]?\s*([\d\.]+)")
         duty = find_value(r"duty\s*[:=]?\s*([\d\.]+)")
         erpm = find_value(r"erpm\s*[:=]?\s*([\d\.]+)")
@@ -105,11 +110,9 @@ async def extract_data(file: UploadFile = File(...), motorName: str = Form(...))
         t_motor = find_value(r"t\s*motor\s*[:=]?\s*([\d\.]+)")
         volts_in = find_value(r"volts?\s*in\s*[:=]?\s*([\d\.]+)")
 
-        # Derived values
         normal_erpm = erpm / 7 if erpm else None
         rpm_48v = (erpm / 7 / volts_in * 48) if erpm and volts_in else None
 
-        # Save temporary image
         temp_path = os.path.join("uploads", f"temp_{file.filename}")
         with open(temp_path, "wb") as f:
             f.write(contents)
@@ -158,7 +161,6 @@ async def save_data(
         final_filename = f"{MotorName}_{timestamp}.png"
         final_image_path = os.path.join("uploads", final_filename)
 
-        # Safely rename temp image if it exists
         if os.path.exists(TempImage):
             os.rename(TempImage, final_image_path)
         else:
