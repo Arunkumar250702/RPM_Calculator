@@ -2,6 +2,7 @@ import re
 import os
 import io
 import sqlite3
+import platform
 from datetime import datetime
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
@@ -11,8 +12,17 @@ from PIL import Image
 import pytesseract
 import pandas as pd
 
-os.makedirs("uploads", exist_ok=True)
+# ✅ Auto-detect Tesseract path for local & Render environment
+if platform.system() == "Windows":
+    pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+else:
+    pytesseract.pytesseract.tesseract_cmd = "/usr/bin/tesseract"
 
+# ✅ Ensure directories exist
+os.makedirs("uploads", exist_ok=True)
+os.makedirs("static", exist_ok=True)
+
+# ✅ SQLite database setup
 DB_FILE = "data.db"
 conn = sqlite3.connect(DB_FILE, check_same_thread=False)
 cursor = conn.cursor()
@@ -38,7 +48,7 @@ conn.commit()
 
 app = FastAPI()
 
-# Enable CORS
+# ✅ Enable CORS for frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -47,15 +57,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Static frontend
+# ✅ Serve static frontend files (index.html, etc.)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
 async def root():
+    """Serve the main frontend page."""
     return FileResponse("static/index.html")
 
+# ✅ OCR Extraction Endpoint
 @app.post("/extract")
 async def extract_data(file: UploadFile = File(...), motorName: str = Form(...)):
+    """Extract text and numerical data from uploaded image."""
     image_data = await file.read()
     image = Image.open(io.BytesIO(image_data))
     text = pytesseract.image_to_string(image)
@@ -95,6 +108,7 @@ async def extract_data(file: UploadFile = File(...), motorName: str = Form(...))
         "Temp Image": temp_path
     }
 
+# ✅ Save data to SQLite
 @app.post("/save")
 async def save_data(
     MotorName: str = Form(...),
@@ -110,24 +124,38 @@ async def save_data(
     RPM48V: float = Form(None),
     TempImage: str = Form(...)
 ):
-    final_image_path = os.path.join("uploads", f"{MotorName}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png")
-    os.rename(TempImage, final_image_path)
+    """Save extracted data to SQLite database and move uploaded image."""
+    # Save image with timestamp
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    final_image_path = os.path.join("uploads", f"{MotorName}_{timestamp}.png")
+
+    # Safely rename (works even if file open or locked)
+    try:
+        os.rename(TempImage, final_image_path)
+    except PermissionError:
+        import shutil
+        shutil.copy(TempImage, final_image_path)
+
     image_url = f"/{final_image_path}"
 
     cursor.execute("""
         INSERT INTO motor_data (
-            motor_name, date_time, power, duty, erpm, i_batt, i_motor, t_fet, t_motor, volts_in, normal_erpm, rpm_48v, image_url
+            motor_name, date_time, power, duty, erpm, i_batt, i_motor, 
+            t_fet, t_motor, volts_in, normal_erpm, rpm_48v, image_url
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         MotorName,
         datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        Power, Duty, ERPM, IBatt, IMotor, TFET, TMotor, VoltsIn, NormalERPM, RPM48V, image_url
+        Power, Duty, ERPM, IBatt, IMotor, TFET, TMotor,
+        VoltsIn, NormalERPM, RPM48V, image_url
     ))
     conn.commit()
     return {"status": "success", "message": "Data saved"}
 
+# ✅ Export data to Excel
 @app.get("/export")
 async def export_excel():
+    """Export all data to Excel (data.xlsx)."""
     df = pd.read_sql_query("SELECT * FROM motor_data", conn)
     excel_file = "data.xlsx"
     df.to_excel(excel_file, index=False)
