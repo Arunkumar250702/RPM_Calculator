@@ -3,7 +3,8 @@ services:
     name: rpm-calculator
     env: python
     buildCommand: |
-      apt-get update && apt-get install -y tesseract-ocr
+      apt-get update && apt-get install -y tesseract-ocr libtesseract-dev
+      pip install --upgrade pip
       pip install -r Backend/requirements.txt
     startCommand: uvicorn Backend.main:app --host 0.0.0.0 --port 10000
     envVars:

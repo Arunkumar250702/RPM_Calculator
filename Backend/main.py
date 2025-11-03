@@ -3,6 +3,7 @@ import io
 import re
 import sqlite3
 import platform
+import subprocess
 from datetime import datetime
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,11 +16,20 @@ import traceback
 
 
 # =========================================================
-# ✅ Configure Tesseract Path (Windows vs Linux)
+# ✅ Check Tesseract Installation & Configure Path
 # =========================================================
+TESSERACT_AVAILABLE = True
+try:
+    result = subprocess.run(["tesseract", "--version"], capture_output=True, text=True)
+    print("✅ Tesseract found:", result.stdout.split("\n")[0])
+except Exception as e:
+    print("❌ Tesseract not found:", str(e))
+    TESSERACT_AVAILABLE = False
+
+# Windows-specific path
 if platform.system() == "Windows":
     pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-# On Render (Linux), it’ll auto-find `/usr/bin/tesseract`
+# On Render (Linux), tesseract should be /usr/bin/tesseract if installed
 
 
 # =========================================================
@@ -27,6 +37,7 @@ if platform.system() == "Windows":
 # =========================================================
 os.makedirs("uploads", exist_ok=True)
 os.makedirs("static", exist_ok=True)
+
 
 # =========================================================
 # ✅ SQLite setup
@@ -54,10 +65,11 @@ CREATE TABLE IF NOT EXISTS motor_data (
 """)
 conn.commit()
 
+
 # =========================================================
 # ✅ FastAPI App Setup
 # =========================================================
-app = FastAPI(title="Motor Data OCR API", version="1.0")
+app = FastAPI(title="Motor Data OCR API", version="1.1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -90,7 +102,16 @@ async def extract_data(file: UploadFile = File(...), motorName: str = Form(...))
     try:
         contents = await file.read()
         image = Image.open(io.BytesIO(contents))
-        text = pytesseract.image_to_string(image)
+
+        # ---- OCR Engine Selection ----
+        if TESSERACT_AVAILABLE:
+            text = pytesseract.image_to_string(image)
+        else:
+            # fallback if tesseract missing
+            import easyocr
+            reader = easyocr.Reader(["en"])
+            results = reader.readtext(contents, detail=0)
+            text = "\n".join(results)
 
         def find_value(pattern):
             match = re.search(pattern, text, re.IGNORECASE)
