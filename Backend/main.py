@@ -2,27 +2,23 @@ import re
 import os
 import io
 import sqlite3
-import platform
 from datetime import datetime
+import platform
+import cv2
+import numpy as np
+import pandas as pd
+import easyocr  # 🔧 replaced pytesseract
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from PIL import Image
-import pytesseract
-import pandas as pd
 
-# ✅ Auto-detect Tesseract path for local & Render environment
-if platform.system() == "Windows":
-    pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-else:
-    pytesseract.pytesseract.tesseract_cmd = "/usr/bin/tesseract"
-
-# ✅ Ensure directories exist
+# 🔧 Directories
 os.makedirs("uploads", exist_ok=True)
 os.makedirs("static", exist_ok=True)
 
-# ✅ SQLite database setup
+# 🔧 SQLite database
 DB_FILE = "data.db"
 conn = sqlite3.connect(DB_FILE, check_same_thread=False)
 cursor = conn.cursor()
@@ -46,9 +42,12 @@ CREATE TABLE IF NOT EXISTS motor_data (
 """)
 conn.commit()
 
+# 🔧 Initialize EasyOCR
+reader = easyocr.Reader(['en'], gpu=False)
+
 app = FastAPI()
 
-# ✅ Enable CORS for frontend
+# ✅ CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -57,58 +56,69 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ✅ Serve static frontend files (index.html, etc.)
+# ✅ Serve static frontend
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/")
 async def root():
-    """Serve the main frontend page."""
-    return FileResponse("static/index.html")
+    """Serve main page"""
+    path = "static/index.html"
+    if not os.path.exists(path):
+        return JSONResponse({"message": "Frontend not found"}, status_code=404)
+    return FileResponse(path)
 
-# ✅ OCR Extraction Endpoint
+# ✅ OCR Extraction
 @app.post("/extract")
 async def extract_data(file: UploadFile = File(...), motorName: str = Form(...)):
-    """Extract text and numerical data from uploaded image."""
-    image_data = await file.read()
-    image = Image.open(io.BytesIO(image_data))
-    text = pytesseract.image_to_string(image)
+    """Extract values from uploaded image"""
+    try:
+        contents = await file.read()
+        image_np = np.frombuffer(contents, np.uint8)
+        image = cv2.imdecode(image_np, cv2.IMREAD_COLOR)
 
-    def find_value(pattern):
-        match = re.search(pattern, text, re.IGNORECASE)
-        return float(match.group(1)) if match else None
+        # 🔧 Use EasyOCR instead of pytesseract
+        result = reader.readtext(image)
+        text = " ".join([r[1] for r in result])
 
-    power = find_value(r"power\s*[:=]?\s*([\d\.]+)")
-    duty = find_value(r"duty\s*[:=]?\s*([\d\.]+)")
-    erpm = find_value(r"erpm\s*[:=]?\s*([\d\.]+)")
-    i_batt = find_value(r"i\s*batt\s*[:=]?\s*([\d\.]+)")
-    i_motor = find_value(r"i\s*motor\s*[:=]?\s*([\d\.]+)")
-    t_fet = find_value(r"t\s*fet\s*[:=]?\s*([\d\.]+)")
-    t_motor = find_value(r"t\s*motor\s*[:=]?\s*([\d\.]+)")
-    volts_in = find_value(r"volts?\s*in\s*[:=]?\s*([\d\.]+)")
+        def find_value(pattern):
+            match = re.search(pattern, text, re.IGNORECASE)
+            return float(match.group(1)) if match else None
 
-    normal_erpm = erpm / 7 if erpm else None
-    rpm_48v = (erpm / 7 / volts_in * 48) if erpm and volts_in else None
+        power = find_value(r"power\s*[:=]?\s*([\d\.]+)")
+        duty = find_value(r"duty\s*[:=]?\s*([\d\.]+)")
+        erpm = find_value(r"erpm\s*[:=]?\s*([\d\.]+)")
+        i_batt = find_value(r"i\s*batt\s*[:=]?\s*([\d\.]+)")
+        i_motor = find_value(r"i\s*motor\s*[:=]?\s*([\d\.]+)")
+        t_fet = find_value(r"t\s*fet\s*[:=]?\s*([\d\.]+)")
+        t_motor = find_value(r"t\s*motor\s*[:=]?\s*([\d\.]+)")
+        volts_in = find_value(r"volts?\s*in\s*[:=]?\s*([\d\.]+)")
 
-    temp_path = os.path.join("uploads", f"temp_{file.filename}")
-    with open(temp_path, "wb") as f:
-        f.write(image_data)
+        normal_erpm = erpm / 7 if erpm else None
+        rpm_48v = (erpm / 7 / volts_in * 48) if erpm and volts_in else None
 
-    return {
-        "Motor Name": motorName,
-        "Power": power,
-        "Duty": duty,
-        "ERPM": erpm,
-        "I Batt": i_batt,
-        "I Motor": i_motor,
-        "T FET": t_fet,
-        "T Motor": t_motor,
-        "Volts In": volts_in,
-        "Normal ERPM": normal_erpm,
-        "48V RPM": rpm_48v,
-        "Temp Image": temp_path
-    }
+        temp_path = os.path.join("uploads", f"temp_{file.filename}")
+        with open(temp_path, "wb") as f:
+            f.write(contents)
 
-# ✅ Save data to SQLite
+        return {
+            "Motor Name": motorName,
+            "Power": power,
+            "Duty": duty,
+            "ERPM": erpm,
+            "I Batt": i_batt,
+            "I Motor": i_motor,
+            "T FET": t_fet,
+            "T Motor": t_motor,
+            "Volts In": volts_in,
+            "Normal ERPM": normal_erpm,
+            "48V RPM": rpm_48v,
+            "Temp Image": temp_path
+        }
+
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+# ✅ Save to DB
 @app.post("/save")
 async def save_data(
     MotorName: str = Form(...),
@@ -122,40 +132,35 @@ async def save_data(
     VoltsIn: float = Form(None),
     NormalERPM: float = Form(None),
     RPM48V: float = Form(None),
-    TempImage: str = Form(...)
+    TempImage: str = Form(...),
 ):
-    """Save extracted data to SQLite database and move uploaded image."""
-    # Save image with timestamp
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    final_image_path = os.path.join("uploads", f"{MotorName}_{timestamp}.png")
-
-    # Safely rename (works even if file open or locked)
     try:
-        os.rename(TempImage, final_image_path)
-    except PermissionError:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        final_image_path = os.path.join("uploads", f"{MotorName}_{timestamp}.png")
+
         import shutil
         shutil.copy(TempImage, final_image_path)
+        image_url = f"/{final_image_path}"
 
-    image_url = f"/{final_image_path}"
+        cursor.execute("""
+            INSERT INTO motor_data (
+                motor_name, date_time, power, duty, erpm, i_batt, i_motor, 
+                t_fet, t_motor, volts_in, normal_erpm, rpm_48v, image_url
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            MotorName,
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            Power, Duty, ERPM, IBatt, IMotor, TFET, TMotor,
+            VoltsIn, NormalERPM, RPM48V, image_url
+        ))
+        conn.commit()
+        return {"status": "success", "message": "Data saved"}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
-    cursor.execute("""
-        INSERT INTO motor_data (
-            motor_name, date_time, power, duty, erpm, i_batt, i_motor, 
-            t_fet, t_motor, volts_in, normal_erpm, rpm_48v, image_url
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        MotorName,
-        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        Power, Duty, ERPM, IBatt, IMotor, TFET, TMotor,
-        VoltsIn, NormalERPM, RPM48V, image_url
-    ))
-    conn.commit()
-    return {"status": "success", "message": "Data saved"}
-
-# ✅ Export data to Excel
+# ✅ Export Excel
 @app.get("/export")
 async def export_excel():
-    """Export all data to Excel (data.xlsx)."""
     df = pd.read_sql_query("SELECT * FROM motor_data", conn)
     excel_file = "data.xlsx"
     df.to_excel(excel_file, index=False)
