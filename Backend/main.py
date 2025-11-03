@@ -10,6 +10,8 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 import pytesseract
 import pandas as pd
+import traceback
+
 
 # ✅ Ensure folders exist
 os.makedirs("uploads", exist_ok=True)
@@ -105,8 +107,11 @@ async def extract_data(file: UploadFile = File(...), motorName: str = Form(...))
             "Temp Image": temp_path
         }
 
+
     except Exception as e:
+        print("❌ EXTRACT ERROR:", traceback.format_exc())
         return JSONResponse({"error": str(e)}, status_code=500)
+
 
 # ✅ Save to DB
 @app.post("/save")
