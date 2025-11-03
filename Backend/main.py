@@ -2,6 +2,7 @@ import os
 import io
 import re
 import sqlite3
+import subprocess
 from datetime import datetime
 import platform
 import cv2
@@ -14,7 +15,17 @@ from fastapi.responses import FileResponse, JSONResponse
 from PIL import Image
 import pytesseract
 
-# ✅ Auto-detect Tesseract path
+# ✅ Auto-install Tesseract in Render or Linux (only if missing)
+if platform.system() != "Windows":
+    try:
+        if not os.path.exists("/usr/bin/tesseract"):
+            print("🔧 Installing Tesseract OCR...")
+            subprocess.run(["apt-get", "update", "-y"], check=True)
+            subprocess.run(["apt-get", "install", "-y", "tesseract-ocr"], check=True)
+    except Exception as e:
+        print(f"⚠️ Tesseract installation failed: {e}")
+
+# ✅ Set Tesseract path
 if platform.system() == "Windows":
     pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 else:
@@ -162,6 +173,10 @@ async def export_excel():
         df = pd.read_sql_query("SELECT * FROM motor_data", conn)
         excel_file = "data.xlsx"
         df.to_excel(excel_file, index=False)
-        return FileResponse(excel_file, filename="motor_data.xlsx", media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        return FileResponse(
+            excel_file,
+            filename="motor_data.xlsx",
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
