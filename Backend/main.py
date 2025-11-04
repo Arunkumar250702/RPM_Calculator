@@ -16,7 +16,7 @@ import traceback
 
 
 # =========================================================
-# ✅ Check Tesseract Installation & Configure Path
+# ✅ Check Tesseract Installation
 # =========================================================
 TESSERACT_AVAILABLE = True
 try:
@@ -26,21 +26,21 @@ except Exception as e:
     print("❌ Tesseract not found:", str(e))
     TESSERACT_AVAILABLE = False
 
-# Windows-specific path
+# Windows-specific path (for local testing)
 if platform.system() == "Windows":
     pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-# On Render (Linux), tesseract should be /usr/bin/tesseract if installed
+# On Render (Linux) → tesseract path = /usr/bin/tesseract
 
 
 # =========================================================
-# ✅ Ensure folders exist
+# ✅ Ensure Folders Exist
 # =========================================================
 os.makedirs("uploads", exist_ok=True)
 os.makedirs("static", exist_ok=True)
 
 
 # =========================================================
-# ✅ SQLite setup
+# ✅ SQLite Setup
 # =========================================================
 DB_FILE = "data.db"
 conn = sqlite3.connect(DB_FILE, check_same_thread=False)
@@ -91,7 +91,7 @@ async def root():
     index_path = os.path.join("static", "index.html")
     if os.path.exists(index_path):
         return FileResponse(index_path)
-    return JSONResponse({"message": "Frontend not found"}, status_code=404)
+    return JSONResponse({"message": "Backend running successfully ✅"}, status_code=200)
 
 
 # =========================================================
@@ -107,12 +107,12 @@ async def extract_data(file: UploadFile = File(...), motorName: str = Form(...))
         if TESSERACT_AVAILABLE:
             text = pytesseract.image_to_string(image)
         else:
-            # fallback if tesseract missing
             import easyocr
             reader = easyocr.Reader(["en"])
             results = reader.readtext(contents, detail=0)
             text = "\n".join(results)
 
+        # ---- Extract Numbers using Regex ----
         def find_value(pattern):
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
@@ -134,6 +134,7 @@ async def extract_data(file: UploadFile = File(...), motorName: str = Form(...))
         normal_erpm = erpm / 7 if erpm else None
         rpm_48v = (erpm / 7 / volts_in * 48) if erpm and volts_in else None
 
+        # Save temporary image
         temp_path = os.path.join("uploads", f"temp_{file.filename}")
         with open(temp_path, "wb") as f:
             f.write(contents)
@@ -212,7 +213,7 @@ async def save_data(
 
 
 # =========================================================
-# ✅ Export Excel
+# ✅ Export Excel Endpoint
 # =========================================================
 @app.get("/export")
 async def export_excel():
